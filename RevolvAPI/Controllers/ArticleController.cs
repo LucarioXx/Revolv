@@ -1,0 +1,138 @@
+﻿using System.Text.Json;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using RevolvAPI.Data;
+using RevolvAPI.DTOs;
+using Microsoft.AspNetCore.Authorization;
+using RevolvAPI.Extensions;
+using RevolvAPI.Services;
+
+namespace RevolvAPI.Controllers
+{
+    [ApiController]
+    [Authorize]
+    [Route("api/articles")]
+    public class ArticleController : ControllerBase
+    {
+        private readonly AppDbContext _ctx;
+        private readonly IReturnAnalyticsService _returnAnalytics;
+
+        public ArticleController(AppDbContext ctx, IReturnAnalyticsService returnAnalytics)
+        {
+            _ctx = ctx;
+            _returnAnalytics = returnAnalytics;
+        }
+
+        [HttpGet]
+        public async Task<IActionResult> GetArticles()
+        {
+            var metrics = await _returnAnalytics.GetArticleReturnMetricsAsync();
+
+            var articles = metrics
+                .Select(m => new ArticleDTO
+                {
+                    Id = m.ArtikelId,
+                    ArticleNumber = m.Sku,
+                    Name = m.Name,
+                    Category = m.Category,
+                    ReturnRate = m.ReturnRatePercent
+                })
+                .ToList();
+
+            return Ok(articles);
+        }
+
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetArticleDetails(int id)
+        {
+            var displayInfo = (await _returnAnalytics.GetArticleDisplayInfoAsync(new[] { id }))
+                .GetValueOrDefault(id);
+
+            if (displayInfo == null)
+            {
+                return NotFound();
+            }
+
+            var companyId = User.GetCompanyId();
+
+            var reanalyzeGate = await _returnAnalytics.GetReanalyzeGateAsync(id, companyId);
+
+            // AI rows keyed by ArtikelId only — article master data lives in WAWI, not revolv.
+            // Ein Artikel kann mehrere Analysen haben; neueste zuerst via OrderNewestFirst (#242),
+            // damit Tabelle/Modal/KI-Hub dieselbe aktive Empfehlung sehen ([0] = aktiv).
+            // Nach CompanyId gefiltert: Firma A darf keine Empfehlungen von Firma B sehen.
+            var recommendations = await AiRecommendationProgress.OrderNewestFirst(
+                    _ctx.AiRecommendations
+                        .AsNoTracking()
+                        .Include(r => r.QualityIssues)
+                        .Include(r => r.DescriptionProposals)
+                        .Include(r => r.ActionRecommendations)
+                        .Where(r => r.ArtikelId == id && r.CompanyId == companyId))
+                .ToListAsync();
+
+            var articleDto = new ArticleDetailDTO
+            {
+                Id = displayInfo.ArtikelId,
+                ArticleNumber = displayInfo.Sku,
+                Name = displayInfo.Name,
+                Category = displayInfo.Category,
+                CanReanalyze = reanalyzeGate.CanReanalyze,
+                ReanalyzeBlockedReason = reanalyzeGate.BlockedReason,
+                DescriptionLastRevisedAt = reanalyzeGate.LastRevisedAt,
+                AiRecommendations = recommendations.Select(r => new AiRecommendationDetailDTO
+                {
+                    Id = r.Id,
+                    ReturnRate = r.ReturnRate,
+                    AiSummaryText = r.AiSummaryText,
+                    IsFullyResolved = r.IsFullyResolved,
+
+                    QualityIssues = r.QualityIssues.Select(q => new QualityIssueDTO
+                    {
+                        Id = q.Id,
+                        IssueText = q.IssueText,
+                        Status = q.Status
+                    }).ToList(),
+
+                    DescriptionProposals = r.DescriptionProposals.Select(d => new DescriptionProposalDTO
+                    {
+                        Id = d.Id,
+                        CurrentText = d.CurrentText,
+                        ProposedText = d.ProposedText,
+                        Status = d.Status,
+                        PushedToWawiAt = d.PushedToWawiAt
+                    }).ToList(),
+
+                    ActionRecommendations = r.ActionRecommendations.Select(ar => new ActionRecommendationDTO
+                    {
+                        Id = ar.Id,
+                        ActionText = ar.ActionText,
+                        ImpactBadge = ar.ImpactBadge,
+                        Priority = ar.Priority,
+                        IsCompleted = ar.IsCompleted
+                    }).ToList(),
+
+                    CustomerComments = DeserializeCustomerComments(r.GeneratedCustomerCommentsJson)
+                }).ToList()
+            };
+
+            return Ok(articleDto);
+        }
+
+        private static List<string> DeserializeCustomerComments(string? json)
+        {
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return new List<string>();
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+            }
+            catch (JsonException)
+            {
+                return new List<string>();
+            }
+        }
+    }
+}

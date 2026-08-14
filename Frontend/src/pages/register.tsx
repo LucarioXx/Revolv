@@ -1,0 +1,136 @@
+import { Box, Card, Stack, Button, CardTitle } from "@jtl-software/platform-ui-react";
+import { useNavigate } from "react-router-dom";
+import { useState } from "react";
+import { UserPlus } from "lucide-react";
+import PasswordField from "../components/PasswordField";
+
+export default function Registrieren() {
+  const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const [companyName, setCompanyName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleRegister = async () => {
+    if (loading) return;
+
+    const trimmedName = name.trim();
+    const trimmedCompanyName = companyName.trim();
+
+    if (!trimmedName) {
+      alert("Bitte gib deinen Namen ein");
+      return;
+    }
+
+    if (!trimmedCompanyName) {
+      alert("Bitte gib deinen Firmennamen ein");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      alert("Passwörter stimmen nicht überein");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const res = await fetch("http://localhost:5215/api/auth/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: trimmedName,
+          companyName: trimmedCompanyName,
+          email,
+          password,
+        }),
+      });
+
+      if (res.ok) {
+        navigate("/login");
+        return;
+      }
+
+      let msg = `Fehler ${res.status}`;
+      try {
+        const json = await res.json();
+        msg = json?.message || JSON.stringify(json) || msg;
+      } catch {}
+      alert(msg);
+    } catch (error) {
+      alert("Netzwerkfehler — bitte erneut versuchen");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const inputClassName =
+    "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-slate-900 outline-none placeholder:text-slate-400 focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:ring-blue-900";
+
+  return (
+    <Box className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <Card className="w-full max-w-md p-8 dark:bg-slate-900 dark:border-slate-700">
+        <Stack>
+          <Box className="flex justify-center">
+            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400">
+              <UserPlus size={26} strokeWidth={1.5} />
+            </span>
+          </Box>
+          <CardTitle className="text-center dark:text-slate-100">Account erstellen</CardTitle>
+          <input
+            className={inputClassName}
+            placeholder="Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <input
+            className={inputClassName}
+            placeholder="Firmenname"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+          />
+          <input
+            className={inputClassName}
+            placeholder="E-Mail"
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <PasswordField
+            inputClassName={inputClassName}
+            placeholder="Passwort"
+            name="new-password"
+            autoComplete="new-password"
+            value={password}
+            disabled={loading}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+          <PasswordField
+            inputClassName={inputClassName}
+            placeholder="Passwort bestätigen"
+            name="confirm-password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            disabled={loading}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+          <Button
+            label={loading ? "Registriere..." : "Registrieren"}
+            variant="highlight"
+            isLoading={loading}
+            disabled={loading}
+            onClick={handleRegister}
+          />
+          <Button
+            label="Zurück zum login"
+            variant="secondary"
+            disabled={loading}
+            onClick={() => navigate("/login")}
+          />
+        </Stack>
+      </Card>
+    </Box>
+  );
+}

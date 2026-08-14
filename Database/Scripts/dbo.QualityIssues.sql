@@ -1,0 +1,12 @@
+USE eazybusiness;
+GO
+
+CREATE TABLE dbo.QualityIssues (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    AiRecommendationId INT NOT NULL,
+    IssueText NVARCHAR(MAX) NOT NULL,
+    Status NVARCHAR(50) NOT NULL DEFAULT 'Ausstehend',
+    CONSTRAINT FK_QualityIssues_AiRecommendations
+        FOREIGN KEY (AiRecommendationId)
+        REFERENCES revolv.AiRecommendations(Id)
+);
